@@ -11,8 +11,30 @@ import image
 
 
 # constants
-ym_per_pix = 30/720 # meters per pixel in y dimension
-xm_per_pix = 3.7/700 # meters per pixel in x dimension
+ym_per_p = 30/720 # meters per pixel in y dimension
+xm_per_p = 3.7/700 # meters per pixel in x dimension
+
+# perspective transform constants
+img_size = (1280, 720)
+offset_x = 300
+offset_y = 0
+
+# source and destination points (top left, top right, bottom right, bottom left)
+src = np.float32([[595, 450], [685, 450], [1000, 660], [280, 660]])
+
+dst = np.float32([[offset_x, offset_y], 
+                  [img_size[0]-offset_x, offset_y],
+                  [img_size[0]-offset_x, img_size[1]-offset_y],
+                  [offset_x, img_size[1]-offset_y]])
+                  
+# left and right masks used for obtaining binary images
+left_mask = np.array([[550, 450], [200, 660], [0, 660], [0, 450]])
+right_mask = np.array([[730, 450], [1080, 660], [1280, 660], [1280, 450]])
+center_mask = np.array([[640, 475], [380, 660], [900, 660]])
+
+# use cv2.getPerspectiveTransform() to get M and Minv, the transform matrix and inverse transform matrix
+M = cv2.getPerspectiveTransform(src, dst)
+Minv = cv2.getPerspectiveTransform(dst,src)
 
 
 def _draw_polygon(img, pts):
@@ -100,14 +122,18 @@ class Lane(object):
         self.right_y = None
         
         # the coefficients of the fitted polynomials
-        self.left_fit_pix = None
-        self.right_fit_pix = None
+        self.left_fit_p = None
+        self.right_fit_p = None
         self.left_fit_m = None
         self.right_fit_m = None
         
         # radii of curvature (in meters and pixels)
         self.left_rad_curv_m = None
-        self.left_rad_curv_pix = None
+        self.left_rad_curv_p = None
+        self.right_rad_curv_m = None
+        self.right_rad_curv_p = None
+        self.rad_curv_m = None
+        self.rad_curv_p = None
         
         # distance from center of the lane (in meters, + values indicate to the right of center)
         self.offcenter = None
@@ -151,7 +177,7 @@ class Lane(object):
     #                                                 #
     # =============================================== #
         
-    def get_undistorted(self, mtx, dist, src=None, outfile=None):
+    def get_undistorted(self, mtx, dist, src=src, show_lines=False, outfile=None):
         """Use `cv2.warpPerspective()` to warp the image to a top-down view
         
         Parameters
@@ -160,8 +186,10 @@ class Lane(object):
             3x3 floating-point camera matrix
         dist : numpy.ndarray
             vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``
-        src : numpy.ndarray, None
+        src : numpy.ndarray
             Nx2 matrix of (x,y) points in the original (undistorted) image
+        show_lines : bool
+            ``if show_lines:`` show the `src` lines in the undistorted image
         outfile : str, None
             path where the undistorted image is to be saved
         
@@ -175,7 +203,7 @@ class Lane(object):
         undistorted = cv2.undistort(self.img, mtx, dist, None, mtx)
         
         # draw lines on the original image
-        if src is not None:
+        if show_lines:
             undistorted = _draw_polygon(undistorted, src)
         
         # save the undistorted image
@@ -184,7 +212,7 @@ class Lane(object):
             
         return undistorted
     
-    def get_perspective(self, mtx, dist, M, dst=None, outfile=None):
+    def get_perspective(self, mtx, dist, M=M, dst=dst, show_lines=False, outfile=None):
         """Use `cv2.warpPerspective()` to warp the image to a top-down view
         
         Parameters
@@ -197,6 +225,8 @@ class Lane(object):
             3x3 transformation matrix
         dst : numpy.ndarray, None
             Nx2 matrix of (x,y) points in the perspective image
+        show_lines : bool
+            ``if show_lines:`` show the `dst` lines in the undistorted image
         outfile : str, None
             path where the perspective image is to be saved
         
@@ -214,7 +244,7 @@ class Lane(object):
         perspective = cv2.warpPerspective(undistorted, M, img_size, flags=cv2.INTER_LINEAR)
         
         # draw lines on the perspective image
-        if dst is not None:
+        if show_lines:
             perspective = _draw_polygon(perspective, dst)
         
         # save the perspective image
@@ -247,16 +277,24 @@ class Lane(object):
         # get channels
         hls = cv2.cvtColor(undistorted, cv2.COLOR_BGR2HLS)
         l_channel = hls[:,:,1]
-        s_channel = hls[:,:,2]
         
         # L channel -- threshold the gradient in the x direction
         sobel_x = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0, ksize=5)
         sobel_x = np.absolute(sobel_x)
         sobel_x = np.uint8(255*sobel_x/np.max(sobel_x))
         
+        # color thresholding
+        l_channel = cv2.cvtColor(undistorted, cv2.COLOR_BGR2LUV)[:,:,0]
+        b_channel = cv2.cvtColor(undistorted, cv2.COLOR_BGR2LAB)[:,:,2]
+        
         # create a binary image
         binary = np.zeros(self.img.shape[:2], dtype=np.uint8)
-        binary[(10 <= sobel_x) | (170 <= s_channel)] = 1
+        binary[(5 <= sobel_x) & ((225 <= l_channel) | (155 <= b_channel))] = 1
+        
+        # apply masks
+        cv2.fillPoly(binary, np.int_([left_mask]), 0)
+        cv2.fillPoly(binary, np.int_([right_mask]), 0)
+        cv2.fillPoly(binary, np.int_([center_mask]), 0)
         
         # save the binary image
         if outfile is not None:
@@ -264,7 +302,7 @@ class Lane(object):
         
         return binary
         
-    def get_binary_perspective(self, mtx, dist, M, outfile=None):
+    def get_binary_perspective(self, mtx, dist, M=M, outfile=None):
         """Get the top-down perspective of the binary image
         
         Parameters
@@ -303,7 +341,7 @@ class Lane(object):
     #                                                 #
     # =============================================== #
     
-    def fit_lines(self, mtx, dist, M, margin_naive, margin_prior, window_width, window_height, minsum, d=2):
+    def fit_lines(self, mtx, dist, margin_naive, margin_prior, window_width, window_height, minsum, M=M, d=2):
         """Find left and right (x,y) points on the binary perspective image and fit a curve to them
         
         Parameters
@@ -312,8 +350,6 @@ class Lane(object):
             3x3 floating-point camera matrix
         dist : numpy.ndarray
             vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``
-        M : numpy.ndarray
-            3x3 transformation matrix        
         margin_naive : int
             the maximum difference between centroids from one level of the image to the next when not using prior information
         margin_prior : int
@@ -324,6 +360,8 @@ class Lane(object):
             we are dividing the image into sections of this height and finding their centroids
         minsum : int, float
             if the sum over the computed centroid window is < `minsum`, disregard it
+        M : numpy.ndarray
+            3x3 transformation matrix        
         d : int
             the degree of the fitted polynomial
         
@@ -343,12 +381,12 @@ class Lane(object):
             nonzero_y = np.array(nonzero[0])
             
             # boolean list which is True when the corresponding `nonzero_x` is within +/- `margin_prior` of the previous left line
-            left_lane_inds = ((nonzero_x > (np.polyval(l0.left_fit_pix, nonzero_y) - margin_prior)) &
-                              (nonzero_x < (np.polyval(l0.left_fit_pix, nonzero_y) + margin_prior)))
+            left_lane_inds = ((nonzero_x > (np.polyval(l0.left_fit_p, nonzero_y) - margin_prior)) &
+                              (nonzero_x < (np.polyval(l0.left_fit_p, nonzero_y) + margin_prior)))
 
             # boolean list which is True when the corresponding `nonzero_x` is within +/- `margin_prior` of the previous right line
-            right_lane_inds = ((nonzero_x > (np.polyval(l0.right_fit_pix, nonzero_y) - margin_prior)) &
-                               (nonzero_x < (np.polyval(l0.right_fit_pix, nonzero_y) + margin_prior)))
+            right_lane_inds = ((nonzero_x > (np.polyval(l0.right_fit_p, nonzero_y) - margin_prior)) &
+                               (nonzero_x < (np.polyval(l0.right_fit_p, nonzero_y) + margin_prior)))
                                
             # set the left and right (x,y) points
             self.left_x = nonzero_x[left_lane_inds]
@@ -358,31 +396,23 @@ class Lane(object):
         
         # don't use any prior information
         else:            
-            window_centroids = self.find_window_centroids(mtx, dist, M, window_width, window_height, margin_naive, minsum)
+            window_centroids = self.find_window_centroids(mtx, dist, window_width, window_height, margin_naive, minsum, M)
 
         # fit the left lane line
         if len(self.left_y) > 0:
-            self.left_fit_pix = np.polyfit(self.left_y, self.left_x, d)
-            self.left_fit_m = np.polyfit(self.left_y * ym_per_pix, self.left_x * xm_per_pix, d)
+            self.left_fit_p = np.polyfit(self.left_y, self.left_x, d)
+            self.left_fit_m = np.polyfit(self.left_y * ym_per_p, self.left_x * xm_per_p, d)
         elif self.prev is not None:
-            self.left_fit_pix = self.prev[0].left_fit_pix
+            self.left_fit_p = self.prev[0].left_fit_p
             self.left_fit_m = self.prev[0].left_fit_m
             
         # fit the right lane line
         if len(self.right_y) > 0:
-            self.right_fit_pix = np.polyfit(self.right_y, self.right_x, d)
-            self.right_fit_m = np.polyfit(self.right_y * ym_per_pix, self.right_x * xm_per_pix, d)
+            self.right_fit_p = np.polyfit(self.right_y, self.right_x, d)
+            self.right_fit_m = np.polyfit(self.right_y * ym_per_p, self.right_x * xm_per_p, d)
         elif self.prev is not None:
-            self.right_fit_pix = self.prev[0].right_fit_pix
+            self.right_fit_p = self.prev[0].right_fit_p
             self.right_fit_m = self.prev[0].right_fit_m
-        
-        # fit the left and right lines (pixels)
-        #self.left_fit_pix = np.polyfit(self.left_y, self.left_x, d)
-        #self.right_fit_pix = np.polyfit(self.right_y, self.right_x, d)
-        
-        # fit the left and right lines (meters)
-        #self.left_fit_m = np.polyfit(self.left_y * ym_per_pix, self.left_x * xm_per_pix, d)
-        #self.right_fit_m = np.polyfit(self.right_y * ym_per_pix, self.right_x * xm_per_pix, d)
         
         # smooth by averaging over the previous `Lane` objects
         self.smooth()
@@ -391,9 +421,9 @@ class Lane(object):
         self.get_rad_curv()
         self.get_offset()
         
-        self.fix_lines(margin_naive, mtx, dist, M)
+        #self.fix_lines(margin_naive, mtx, dist, M)
     
-    def find_window_centroids(self, mtx, dist, M, window_width, window_height, margin_naive, minsum):
+    def find_window_centroids(self, mtx, dist, window_width, window_height, margin_naive, minsum, M=M):
         """Find the window centroids, with or without prior information
         
         Parameters
@@ -402,8 +432,6 @@ class Lane(object):
             3x3 floating-point camera matrix
         dist : numpy.ndarray
             vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``
-        M : numpy.ndarray
-            3x3 transformation matrix 
         window_width : int
             the width of the convolution used for computing windowed sums
         window_height : int
@@ -412,6 +440,8 @@ class Lane(object):
             the maximum difference between centroids from one level of the image to the next when not using prior information
         minsum : int, float
             if the sum over the computed centroid window is < `minsum`, disregard it
+        M : numpy.ndarray
+            3x3 transformation matrix 
             
         Returns
         -------
@@ -448,6 +478,8 @@ class Lane(object):
         window_centroids = [(l_center, r_center, rows-window_height)]
 
         # Go through each layer looking for max pixel locations    
+        margin_naive_left = margin_naive
+        margin_naive_right = margin_naive
         for level in range(1, int(rows/window_height)):
             # convolve the window into the vertical slice of the image
             row0 = int(rows - (level+1)*window_height)
@@ -456,17 +488,28 @@ class Lane(object):
             conv_signal = np.convolve(window, image_layer)
 
             # find the best left centroid that is within +/- `margin_naive` pixels of the previous centroid
-            l_min_index = int(max(l_center + offset - margin_naive, 0))
-            l_max_index = int(min(l_center + offset + margin_naive, cols))
+            l_min_index = int(max(l_center + offset - margin_naive_left, 0))
+            l_max_index = int(min(l_center + offset + margin_naive_left, cols))
 
             # find the best left centroid that is within +/- `margin_naive` pixels of the previous centroid
-            r_min_index = int(max(r_center + offset - margin_naive, 0))
-            r_max_index = int(min(r_center + offset + margin_naive, cols))
+            r_min_index = int(max(r_center + offset - margin_naive_right, 0))
+            r_max_index = int(min(r_center + offset + margin_naive_right, cols))
             
-            if minsum < max(conv_signal[l_min_index:l_max_index]) and minsum < max(conv_signal[r_min_index:r_max_index]):
+            # found the left lane line
+            if minsum < max(conv_signal[l_min_index:l_max_index]):
                 l_center = np.argmax(conv_signal[l_min_index:l_max_index]) + l_min_index - offset
-                r_center = np.argmax(conv_signal[r_min_index:r_max_index]) + r_min_index - offset 
+                margin_naive_left = margin_naive
+            else:
+                margin_naive_left += margin_naive
                 
+            # found the right lane line
+            if minsum < max(conv_signal[r_min_index:r_max_index]):
+                r_center = np.argmax(conv_signal[r_min_index:r_max_index]) + r_min_index - offset
+                margin_naive_right = margin_naive
+            else:
+                margin_naive_right += margin_naive
+                 
+            if margin_naive_left == margin_naive or margin_naive_right == margin_naive:
                 window_centroids.append((l_center, r_center, row0))
             
         # boolean lists which will be True when the corresponding `nonzero_x` is within +/- `margin_naive` of the previous left/right line
@@ -495,20 +538,58 @@ class Lane(object):
         return window_centroids
         
     def get_rad_curv(self):
-        """Get the left and right radii of curvature (in meters and pixels)
+        """Get the left, right, and center radii of curvature (in meters and pixels)
         
         """
         # radii of curvature
-        rows = self.img.shape[0]
-        y0 = rows-1
+        y0_p = self.img.shape[0]-1
+        y0_m = y0_p * ym_per_p
         
         # radii of curvature (pixels)
-        self.left_rad_curv_pix = ((1 + (np.polyval(np.polyder(self.left_fit_pix, 1), y0)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.left_fit_pix, 2), y0)))
-        self.right_rad_curv_pix = ((1 + (np.polyval(np.polyder(self.right_fit_pix, 1), y0)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.right_fit_pix, 2), y0)))
+        self.left_rad_curv_p = ((1 + (np.polyval(np.polyder(self.left_fit_p, 1), y0_p)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.left_fit_p, 2), y0_p)))
+        self.right_rad_curv_p = ((1 + (np.polyval(np.polyder(self.right_fit_p, 1), y0_p)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.right_fit_p, 2), y0_p)))
         
         # radii of curvature (meters)
-        self.left_rad_curv_m = ((1 + (np.polyval(np.polyder(self.left_fit_m, 1), y0*ym_per_pix)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.left_fit_m, 2), y0*ym_per_pix)))
-        self.right_rad_curv_m = ((1 + (np.polyval(np.polyder(self.right_fit_m, 1), y0*ym_per_pix)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.right_fit_m, 2), y0*ym_per_pix)))
+        self.left_rad_curv_m = ((1 + (np.polyval(np.polyder(self.left_fit_m, 1), y0_m)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.left_fit_m, 2), y0_m)))
+        self.right_rad_curv_m = ((1 + (np.polyval(np.polyder(self.right_fit_m, 1), y0_m)**2)**1.5) / np.absolute(np.polyval(np.polyder(self.right_fit_m, 2), y0_m)))
+        
+        # parameters in pixels
+        x0_left_p = np.polyval(self.left_fit_p, y0_p)
+        x0_right_p = np.polyval(self.right_fit_p, y0_p)
+        dx_p = x0_right_p - x0_left_p
+        
+        # parameters in meters        
+        x0_left_m = np.polyval(self.left_fit_m, y0_m)
+        x0_right_m = np.polyval(self.right_fit_m, y0_m)
+        dx_m = x0_right_m - x0_left_m
+        
+        # number of unique y points fitted
+        n_left = len(np.unique(self.left_y))
+        n_right = len(np.unique(self.right_y))
+        
+        # use the left radius of curvature
+        if n_left > n_right:
+            # turning right
+            if np.polyval(np.polyder(self.left_fit_p, 2), y0_p) > 0:
+                self.rad_curv_p = self.left_rad_curv_p - dx_p / 2
+                self.rad_curv_m = self.left_rad_curv_m - dx_m / 2
+            
+            # turning left
+            else:
+                self.rad_curv_p = self.left_rad_curv_p + dx_p / 2
+                self.rad_curv_m = self.left_rad_curv_m + dx_m / 2
+        
+        # use the right radius of curvature
+        else:
+            # turning right
+            if np.polyval(np.polyder(self.right_fit_p, 2), y0_p) > 0:
+                self.rad_curv_p = self.right_rad_curv_p + dx_p / 2
+                self.rad_curv_m = self.right_rad_curv_m + dx_m / 2
+            
+            # turning left
+            else:
+                self.rad_curv_p = self.right_rad_curv_p - dx_p / 2
+                self.rad_curv_m = self.right_rad_curv_m - dx_m / 2
     
     def get_offset(self):
         """Get the offset of the vehicle from the center of the lane
@@ -517,9 +598,9 @@ class Lane(object):
         rows, cols = self.img.shape[:2]
         y0 = rows-1
         
-        left = np.polyval(self.left_fit_m, y0*ym_per_pix)
-        right = np.polyval(self.right_fit_m, y0*ym_per_pix)
-        center = cols / 2 * xm_per_pix
+        left = np.polyval(self.left_fit_m, y0*ym_per_p)
+        right = np.polyval(self.right_fit_m, y0*ym_per_p)
+        center = cols / 2 * xm_per_p
         self.offcenter = center - (left + right)/2
     
     # =============================================== #
@@ -528,7 +609,7 @@ class Lane(object):
     #                                                 #
     # =============================================== #
     
-    def plot_lines(self, mtx, dist, M, Minv, show_text=True, show_plot=False, outfile=None):
+    def plot_lines(self, mtx, dist, M=M, Minv=Minv, show_text=True, show_plot=False, outfile=None):
         """Plot the fitted lane lines
         
         Parameters
@@ -559,8 +640,8 @@ class Lane(object):
         
         # generate the plot points
         plot_y = np.linspace(0, rows-1, rows)
-        left_fit_x = np.polyval(self.left_fit_pix, plot_y)
-        right_fit_x = np.polyval(self.right_fit_pix, plot_y)
+        left_fit_x = np.polyval(self.left_fit_p, plot_y)
+        right_fit_x = np.polyval(self.right_fit_p, plot_y)
 
         # Recast the x and y points into usable format for cv2.fillPoly()
         pts_left = np.array([np.transpose(np.vstack([left_fit_x, plot_y]))])
@@ -584,20 +665,15 @@ class Lane(object):
             color1 = (0, 0, 0)
             color2 = (255, 255, 255)
                 
-            cv2.putText(result, 'Left radius of curvature:', (20,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, 'Left radius of curvature:', (20,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
-            cv2.putText(result, '{0:>10.3f} m'.format(self.left_rad_curv_m), (800,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, '{0:>10.3f} m'.format(self.left_rad_curv_m), (800,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
+            cv2.putText(result, 'Radius of curvature:', (20,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
+            cv2.putText(result, 'Radius of curvature:', (20,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
+            cv2.putText(result, '{0:>10.3f} m'.format(self.rad_curv_m), (700,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
+            cv2.putText(result, '{0:>10.3f} m'.format(self.rad_curv_m), (700,60), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
             
-            cv2.putText(result, 'Right radius of curvature:', (20,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, 'Right radius of curvature:', (20,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
-            cv2.putText(result, '{0:>10.3f} m'.format(self.right_rad_curv_m), (800,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, '{0:>10.3f} m'.format(self.right_rad_curv_m), (800,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
-            
-            cv2.putText(result, 'Distance from lane center:', (20,200), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, 'Distance from lane center:', (20,200), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
-            cv2.putText(result, '{0:>+10.3f} m'.format(self.offcenter), (800,200), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
-            cv2.putText(result, '{0:>+10.3f} m'.format(self.offcenter), (800,200), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
+            cv2.putText(result, 'Distance from lane center:', (20,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
+            cv2.putText(result, 'Distance from lane center:', (20,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
+            cv2.putText(result, '{0:>+10.3f} m'.format(self.offcenter), (700,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color1, thickness1, cv2.LINE_AA)
+            cv2.putText(result, '{0:>+10.3f} m'.format(self.offcenter), (700,130), cv2.FONT_HERSHEY_SIMPLEX, fontscale, color2, thickness2, cv2.LINE_AA)
         
         # save the plotted lines image
         if outfile is not None:
@@ -609,7 +685,7 @@ class Lane(object):
         else:
             return result
 
-    def plot_lines_perspective(self, mtx, dist, M, margin, outfile=None):
+    def plot_lines_perspective(self, mtx, dist, margin, M=M, outfile=None):
         """Plot the fitted lane lines on the binary perspective images
         
         Parameters
@@ -617,11 +693,11 @@ class Lane(object):
         mtx : numpy.ndarray
             3x3 floating-point camera matrix
         dist : numpy.ndarray
-            vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``
-        M : numpy.ndarray
-            3x3 transformation matrix        
+            vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``     
         margin : int
             points within +/- `margin` of the line will be highlighted
+        M : numpy.ndarray
+            3x3 transformation matrix   
         outfile : str, None
             path where the plotted lines perspective image is to be saved
         
@@ -639,8 +715,8 @@ class Lane(object):
         
         # generate the plot points
         plot_y = np.linspace(0, rows-1, rows)
-        left_fit_x = np.polyval(self.left_fit_pix, plot_y)
-        right_fit_x = np.polyval(self.right_fit_pix, plot_y)
+        left_fit_x = np.polyval(self.left_fit_p, plot_y)
+        right_fit_x = np.polyval(self.right_fit_p, plot_y)
 
         # Generate a polygon to illustrate the search window area
         # and recast the x and y points into usable format for cv2.fillPoly()
@@ -656,8 +732,12 @@ class Lane(object):
         cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
         cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
         result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-        result[np.int_(plot_y), np.int_(left_fit_x), :] = [0, 255, 255]
-        result[np.int_(plot_y), np.int_(right_fit_x), :] = [0, 255, 255]
+        
+        for x_left, x_right, y in zip(np.int_(left_fit_x), np.int_(right_fit_x), np.int_(plot_y)):
+            if 0 <= x_left < cols:
+                result[y, x_left, :] = [0, 255, 255]
+            if 0 <= x_right < cols:
+                result[y, x_right, :] = [0, 255, 255]
         
         # save the plotted lines perspective image
         if outfile is not None:
@@ -673,7 +753,7 @@ class Lane(object):
         ax2.set_ylim(rows, 0)
         plt.show()
     
-    def plot_window_centroids(self, mtx, dist, M, window_centroids, window_width, window_height, outfile=None):
+    def plot_window_centroids(self, mtx, dist, window_centroids, window_width, window_height, M=M, outfile=None):
         """Plot the window centroids
         
         Parameters
@@ -682,8 +762,6 @@ class Lane(object):
             3x3 floating-point camera matrix
         dist : numpy.ndarray
             vector of distortion coefficients: ``(k_1, k_2, p_1, p_2, k_3)``
-        M : numpy.ndarray
-            3x3 transformation matrix
         window_centroids : list
             a list of the ``(left, right)`` centroids on each level
         warped : numpy.ndarray
@@ -692,6 +770,8 @@ class Lane(object):
             the width of the convolution used for computing windowed sums
         window_height : int
             the height of the windows for which we have found the centroids
+        M : numpy.ndarray
+            3x3 transformation matrix
         outfile : str, None
             path where the window centroids image is to be saved
         
@@ -735,7 +815,7 @@ class Lane(object):
     #                                                 #
     # =============================================== #
     
-    def rmse(self, margin, mtx, dist, M):
+    def rmse(self, margin, mtx, dist, M=M):
         """Calculate the root mean squared error for the left and right lines to find which one is better
         
         Parameters
@@ -765,12 +845,12 @@ class Lane(object):
         nonzero_y = np.array(nonzero[0])
         
         # boolean list which is True when the corresponding `nonzero_x` is within +/- `margin` of the fitted left line
-        left_lane_inds = ((nonzero_x > (np.polyval(self.left_fit_pix, nonzero_y) - margin)) &
-                          (nonzero_x < (np.polyval(self.left_fit_pix, nonzero_y) + margin)))
+        left_lane_inds = ((nonzero_x > (np.polyval(self.left_fit_p, nonzero_y) - margin)) &
+                          (nonzero_x < (np.polyval(self.left_fit_p, nonzero_y) + margin)))
 
         # boolean list which is True when the corresponding `nonzero_x` is within +/- `margin` of the fitted right line
-        right_lane_inds = ((nonzero_x > (np.polyval(self.right_fit_pix, nonzero_y) - margin)) &
-                           (nonzero_x < (np.polyval(self.right_fit_pix, nonzero_y) + margin)))
+        right_lane_inds = ((nonzero_x > (np.polyval(self.right_fit_p, nonzero_y) - margin)) &
+                           (nonzero_x < (np.polyval(self.right_fit_p, nonzero_y) + margin)))
                            
         # set the left and right (x,y) points
         left_x = nonzero_x[left_lane_inds]
@@ -778,15 +858,15 @@ class Lane(object):
         right_x = nonzero_x[right_lane_inds]
         right_y = nonzero_y[right_lane_inds]
         
-        left_calc = np.polyval(self.left_fit_pix, left_y)
-        right_calc = np.polyval(self.right_fit_pix, right_y)
+        left_calc = np.polyval(self.left_fit_p, left_y)
+        right_calc = np.polyval(self.right_fit_p, right_y)
         
         rmse_left = np.linalg.norm(left_x - left_calc, 2) / np.sqrt(len(left_calc))
         rmse_right = np.linalg.norm(right_x - right_calc, 2) / np.sqrt(len(right_calc))
         
         return rmse_left, rmse_right
         
-    def fix_lines(self, margin, mtx, dist, M):
+    def fix_lines(self, margin, mtx, dist, M=M):
         """Make sure that the fitted lines radii of curvature are consistent
         
         Parameters
@@ -803,33 +883,39 @@ class Lane(object):
         """
         # parameters in pixels
         y0_p = self.img.shape[0]-1
-        x0_left_p = np.polyval(self.left_fit_pix, y0_p)
-        x0_right_p = np.polyval(self.right_fit_pix, y0_p)
+        x0_left_p = np.polyval(self.left_fit_p, y0_p)
+        x0_right_p = np.polyval(self.right_fit_p, y0_p)
         dx_p = x0_right_p - x0_left_p
         
         # parameters in meters        
-        y0_m = y0_p * ym_per_pix
+        y0_m = y0_p * ym_per_p
         x0_left_m = np.polyval(self.left_fit_m, y0_m)
         x0_right_m = np.polyval(self.right_fit_m, y0_m)
         dx_m = x0_right_m - x0_left_m
         
+        # number of unique y points fitted
+        n_left = len(np.unique(self.left_y))
+        n_right = len(np.unique(self.right_y))
+        
+        # root mean square errors
         rmse_left, rmse_right = self.rmse(margin, mtx, dist, M)
         
-        if rmse_left < rmse_right:
+        # fix the right line
+        if n_left > 2*n_right or (rmse_left < rmse_right and n_right <= 2*n_left):
             # the first derivative
-            dx_dy_p = np.polyval(np.polyder(self.left_fit_pix, 1), y0_p)
+            dx_dy_p = np.polyval(np.polyder(self.left_fit_p, 1), y0_p)
             dx_dy_m = np.polyval(np.polyder(self.left_fit_m, 1), y0_m)
             
             # correct the radius of curvature and the `a` coefficient
-            if np.polyval(np.polyder(self.left_fit_pix, 2), y0_p) > 0:
-                right_rad_curv_p = self.left_rad_curv_pix - dx_p
+            if np.polyval(np.polyder(self.left_fit_p, 2), y0_p) > 0:
+                right_rad_curv_p = self.left_rad_curv_p - dx_p
                 right_rad_curv_m = self.left_rad_curv_m - dx_m
                 
                 a_p = (1 + dx_dy_p**2)**1.5 / 2 / right_rad_curv_p
                 a_m = (1 + dx_dy_m**2)**1.5 / 2 / right_rad_curv_m
                 
             else:
-                right_rad_curv_p = self.left_rad_curv_pix + dx_p
+                right_rad_curv_p = self.left_rad_curv_p + dx_p
                 right_rad_curv_m = self.left_rad_curv_m + dx_m
                 
                 a_p = -(1 + dx_dy_p**2)**1.5 / 2 / right_rad_curv_p
@@ -841,25 +927,27 @@ class Lane(object):
             c_p = x0_right_p - a_p * y0_p**2 - b_p * y0_p
             c_m = x0_right_m - a_m * y0_m**2 - b_m * y0_m
             
-            self.right_fit_pix = np.array([a_p, b_p, c_p])
+            #c_p = np.mean(np.array([x - np.polyval([a_p, b_p, 0.], y) for x, y in zip(self.right_x, self.right_y)]))
+            #c_m = np.mean(np.array([x*xm_per_p - np.polyval([a_m, b_m, 0.], y*ym_per_p) for x, y in zip(self.right_x, self.right_y)]))
+            
+            self.right_fit_p = np.array([a_p, b_p, c_p])
             self.right_fit_m = np.array([a_m, b_m, c_m])
-            #self.right_fit_m = np.array([a * xm_per_pix / ym_per_pix**2, b * xm_per_pix / ym_per_pix, c * xm_per_pix])
             
         else:
             # the first derivative
-            dx_dy_p = np.polyval(np.polyder(self.right_fit_pix, 1), y0_p)
+            dx_dy_p = np.polyval(np.polyder(self.right_fit_p, 1), y0_p)
             dx_dy_m = np.polyval(np.polyder(self.right_fit_m, 1), y0_m)
             
             # correct the radius of curvature and the `a` coefficient
-            if np.polyval(np.polyder(self.right_fit_pix, 2), y0_p) > 0:
-                left_rad_curv_p = self.right_rad_curv_pix + dx_p
+            if np.polyval(np.polyder(self.right_fit_p, 2), y0_p) > 0:
+                left_rad_curv_p = self.right_rad_curv_p + dx_p
                 left_rad_curv_m = self.right_rad_curv_m + dx_m
                 
                 a_p = (1 + dx_dy_p**2)**1.5 / 2 / left_rad_curv_p
                 a_m = (1 + dx_dy_m**2)**1.5 / 2 / left_rad_curv_m
                 
             else:
-                left_rad_curv_p = self.right_rad_curv_pix - dx_p
+                left_rad_curv_p = self.right_rad_curv_p - dx_p
                 left_rad_curv_m = self.right_rad_curv_m - dx_m
                 
                 a_p = -(1 + dx_dy_p**2)**1.5 / 2 / left_rad_curv_p
@@ -871,9 +959,11 @@ class Lane(object):
             c_p = x0_left_p - a_p * y0_p**2 - b_p * y0_p
             c_m = x0_left_m - a_m * y0_m**2 - b_m * y0_m
             
-            self.left_fit_pix = np.array([a_p, b_p, c_p])
+            #c_p = np.mean(np.array([x - np.polyval([a_p, b_p, 0.], y) for x, y in zip(self.left_x, self.left_y)]))
+            #c_m = np.mean(np.array([x*xm_per_p - np.polyval([a_m, b_m, 0.], y*ym_per_p) for x, y in zip(self.left_x, self.left_y)]))
+            
+            self.left_fit_p = np.array([a_p, b_p, c_p])
             self.left_fit_m = np.array([a_m, b_m, c_m])
-            #self.left_fit_m = np.array([a * xm_per_pix / ym_per_pix**2, b * xm_per_pix / ym_per_pix, c * xm_per_pix])
             
         self.get_rad_curv()
         self.get_offset()
@@ -883,7 +973,7 @@ class Lane(object):
         
         """
         if self.prev is not None:
-            self.left_fit_pix = np.mean([l.left_fit_pix for l in self.prev] + [self.left_fit_pix], axis=0)
-            self.right_fit_pix = np.mean([l.right_fit_pix for l in self.prev] + [self.right_fit_pix], axis=0)
+            self.left_fit_p = np.mean([l.left_fit_p for l in self.prev] + [self.left_fit_p], axis=0)
+            self.right_fit_p = np.mean([l.right_fit_p for l in self.prev] + [self.right_fit_p], axis=0)
             self.left_fit_m = np.mean([l.left_fit_m for l in self.prev] + [self.left_fit_m], axis=0)
             self.right_fit_m = np.mean([l.right_fit_m for l in self.prev] + [self.right_fit_m], axis=0)

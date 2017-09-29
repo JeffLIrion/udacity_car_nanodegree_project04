@@ -64,7 +64,9 @@ And here is the undistorted image:
 
 See [`Lane.get_binary()`](./lane.html#Lane.get_binary())
 
-I used a combination of color and gradient thresholds to generate a binary image.  More specifically, I thresholded the gradient of the L channel and the pixel values of the S channel.  Here's an example of my output for this step:
+I used a combination of color and gradient thresholds to generate a binary image.  More specifically, I thresholded the gradient of the L channel (from HLS) and the pixel values of the L channel (from LUV) and the B channel (from LAB).  I also applied a mask, zeroing out the left, center, and right regions of the image.  
+
+Here's an example of my output for this step:
 
 ![Original "test2.jpg"](./output_images/test_images/test2.jpg)
 ![Undistorted binary "test2.jpg"](./output_images/binary/binary_test2.jpg)
@@ -77,16 +79,18 @@ See [`Lane.get_perspective()`](./lane.html#Lane.get_perspective()) and [Perspect
 
 For my perspective transform, I specified 4 corners of a trapezoid (as `src`) in the undistorted original images and I specified the 4 corresponding corners of a rectangle (as `dst`) to which they are mapped in the perspective image.  After inspecting an undistorted image, I specified the parameters as follows:
 
-```python
-offset_x = 300
-offset_y = 0
+```
+img_size = (1280, 720)
 
-src = np.float32([[595, 450], [685, 450], [1000, 660], [280, 660]])
+     src = [[  595,  450 ]
+            [  685,  450 ]
+            [ 1000,  660 ]
+            [  280,  660 ]]
 
-dst = np.float32([[offset_x, offset_y],
-                  [img_size[0]-offset_x, offset_y],
-                  [img_size[0]-offset_x, img_size[1]-offset_y],
-                  [offset_x, img_size[1]-offset_y]])
+     src = [[  300,    0 ]
+            [  980,    0 ]
+            [  980,  720 ]
+            [  300,  720 ]]
 ```
 
 Here is the undistorted "straight_lines1.jpg":
@@ -113,11 +117,7 @@ Here are the steps I followed for fitting the lane lines.
 
 3. Fit polynomials to the sets of points found in the previous step.  My code accepts a parameter `d` that specifies the degree of the polynomials, but I only experimented with `d = 2`.  I fitted polynomials for both pixels and meters as the measurement units.  In the next step, I did some post-processing on these polynomials.  
 
-4. Post-process the fitted polynomials.  If the image (i.e., `Lane` object) was part of a sequence, I averaged the polynomial coefficients over the last `n=3` polynomial fits.  I then computed the root mean square error (RMSE; see [`Lane.rmse()`](./lane.html#Lane.rmse())) for both the left and right polynomials, where only points within +/- `margin` of the polynomials were considered.  The polynomial with the lower RMSE *should* be a better fit to the true lane line.  I discarded the polynomial with the higher RMSE and replaced it with a polynomial of degree 2 such that:
-
-  * it has the same `x` value as the discarded polynomial at `y = rows - 1`, where `rows` is the number of rows in the image
-  * it has the same first derivative as the polynomial with the lower RMSE at `y = rows - 1`
-  * its radius of curvature at `y = rows - 1` is greater/smaller than the other polynomial's radius of curvature by `abs(x_right[rows-1] - x_left[rows-1])`, depending on which direction the car is turning.
+4. Post-process the fitted polynomials.  If the image (i.e., `Lane` object) was part of a sequence, I averaged the polynomial coefficients over the last `n=3` polynomial fits.  
 
   Here is an example of the final fitted lane lines, which I generated using [`Lane.plot_lines_perspective()`](./lane.html#Lane.plot_lines_perspective()):
 
@@ -134,6 +134,8 @@ I calculated the left and right radii of curvature using the formula:
 ```
 r = (1 + (first_deriv)**2)**1.5 / abs(second_deriv)
 ```
+
+For the overall/center radius of curvature, I took whichever polynomial was fitted to more unique `y` values and used its radius of curvature (after adding/subtracting half of the lane width).  
 
 I calculated the offset of the vehicle by finding the `x` values (in meters) of the left and right polynomials at `y = (rows - 1) * ym_per_pix` and then took the difference from the center column of the image, converted to meters: `center = cols / 2 * xm_per_pix`.  
 
@@ -163,7 +165,7 @@ Here's a [link to my video result](./project_video_lanes.mp4)
 
 **Challenges**
 
-Getting good quality binary images was more difficult than I expected, and I feel that there is a lot of room for improvement on this aspect of the project.  The difficulty was detecting the lanes but not detecting other edges, such as those due to shadows or the edge of the road.  
+Getting good quality binary images was more difficult than I expected, and I still feel that there is room for improvement on this aspect of the project.  The difficulty was detecting the lanes but not detecting other edges, such as those due to shadows or the edge of the road.  
 
 **Where the pipeline struggles**
 
@@ -171,10 +173,8 @@ As can be seen in the [video](./project_video_lanes.mp4), this pipeline struggle
 
 **Where the pipeline might fail**
 
-I can think of three general categories that would cause this pipeline to fail:
+A couple scenarios that could cause this pipeline to fail include:
 
-1. **The car is not driving within the lane lines.**  This pipeline assumes that the car is driving more or less in the center of the lane.  It would likely fail if the car were to change lanes because the model is simply not designed to handle a complex case such as this.  
-2. **The binary thresholding portion of the pipeline does not detect the lane lines.**  As I mentioned before, I feel that this aspect of the pipeline could be made much more accurate and robust.  
-3. **The binary thresholding portion of the pipeline fails to eliminate edges which are not lane lines.**  While I did not work much with the challenge video, the pipeline performs poorly there due to the line in the middle of the lane between the light and dark asphalt.  The model might also struggle with "tar snakes" on a road.  In order to accurately fit a polynomial to the lane lines, we need to have good data points with minimal noisy data points.  
+1. **The car is not driving within the lane lines.**  This pipeline assumes that the car is driving more or less in the center of the lane.  It would likely fail if the car were to change lanes because the model is simply not designed to handle a complex case such as this, especially considering that I used a mask which zeroed out the left, right, and center of the image in order to obtain the binary thresholded image.  
 
-Issues 2 and 3 relate to finding which pixels correspond to the lanes.  If we can do this reliably, then fitting a polynomial to those points should yield accurate estimations of the lane lines.  
+2. **The binary thresholding portion of the pipeline fails to eliminate edges which are not lane lines.**  While I did not work much with the challenge video, a previous version of my pipeline performed poorly on that video due to the line in the middle of the lane between the light and dark asphalt.  The model might struggle with words or signs painted on the road, such as "SLOW" or a crosswalk.  In order to accurately fit a polynomial to the lane lines, we need to have good data points with minimal noisy data points.  
