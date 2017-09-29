@@ -1,6 +1,6 @@
 # **Advanced Lane Finding**
 
-[Exported Jupyter notebook](https://jefflirion.github.io/udacity_car_nanodegree_project04/Advanced_Lane_Finding.html)
+[Exported Jupyter notebook](https://jefflirion.github.io/udacity_car_nanodegree_project04/Advanced_Lane_Finding_Project.html)
 
 ---
 
