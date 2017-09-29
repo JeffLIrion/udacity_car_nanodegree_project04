@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset='utf-8'>
+<meta http-equiv="X-UA-Compatible" content="chrome=1">
+<meta name="description" content="Udacity Self-Driving Car Nanodegree -- Project 4">
+
+<link rel="stylesheet" type="text/css" media="screen" href="https://jefflirion.github.io/stylesheets/stylesheet.css">
+
+<title>Udacity Self-Driving Car Nanodegree -- Project 4</title>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div id="header_wrap" class="outer">
+<header class="inner">
+<a id="home_banner" href="https://jefflirion.github.io/udacity/index.html#self-driving-car">Self-Driving Car</a>
+<a id="repo_banner" href="https://github.com/JeffLIrion/udacity_car_nanodegree_project04">View this repo</a>
+<h1 id="project_title">Udacity Self-Driving Car Nanodegree -- Project 4</h1>
+
+</header>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="main_content_wrap" class="outer">
+<section id="main_content" class="inner">
+
+
+
+
+<h1><a id="Advanced_Lane_Finding_0"></a><strong>Advanced Lane Finding</strong></h1>
+<p><a href="https://jefflirion.github.io/udacity_car_nanodegree_project04/Advanced_Lane_Finding.html">Exported Jupyter notebook</a></p>
+<hr>
+<h2><a id="From_Udacity_6"></a>From Udacity:</h2>
+<blockquote>
+<p>The goals / steps of this project are the following:</p>
+<ul>
+<li>Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.</li>
+<li>Apply a distortion correction to raw images.</li>
+<li>Use color transforms, gradients, etc., to create a thresholded binary image.</li>
+<li>Apply a perspective transform to rectify binary image (“birds-eye view”).</li>
+<li>Detect lane pixels and fit to find the lane boundary.</li>
+<li>Determine the curvature of the lane and vehicle position with respect to center.</li>
+<li>Warp the detected lane boundaries back onto the original image.</li>
+<li>Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.</li>
+</ul>
+<h2><a id="Rubric_Points_21"></a>Rubric Points</h2>
+<p>Here I will consider the <a href="https://review.udacity.com/#!/rubrics/571/view">rubric points</a> individually and describe how I addressed each point in my implementation.</p>
+</blockquote>
+<h3><a id="Writeup__README_27"></a>Writeup / README</h3>
+<h4><a id="1_Provide_a_Writeup__README_that_includes_all_the_rubric_points_and_how_you_addressed_each_one__You_can_submit_your_writeup_as_markdown_or_pdf__HerehttpsgithubcomudacityCarNDAdvancedLaneLinesblobmasterwriteup_templatemd_is_a_template_writeup_for_this_project_you_can_use_as_a_guide_and_a_starting_point_29"></a>1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  You can submit your writeup as markdown or pdf.  <a href="https://github.com/udacity/CarND-Advanced-Lane-Lines/blob/master/writeup_template.md">Here</a> is a template writeup for this project you can use as a guide and a starting point.</h4>
+<p>You’re reading it!</p>
+<h3><a id="Camera_Calibration_33"></a>Camera Calibration</h3>
+<h4><a id="1_Briefly_state_how_you_computed_the_camera_matrix_and_distortion_coefficients_Provide_an_example_of_a_distortion_corrected_calibration_image_35"></a>1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.</h4>
+<p>The code for this step can be found here: <a href="./Advanced_Lane_Finding_Project.html#1.-Compute-the-camera-calibration-matrix-and-distortion-coefficients-given-a-set-of-chessboard-images.">1. Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.</a> and <a href="./image.html#image.calibrate_camera"><code>image.calibrate_camera()</code></a></p>
+<p>I loaded the calibration images and converted them to grayscale.  I specified that there are 9 interior corners in the x direction (<code>nx = 9</code>) and 6 interior corners in the y direction (<code>ny = 6</code>) in these calibration images.  I used the function <code>cv2.findChessboardCorners()</code> to find these points in the images, and when they were successfully found I appended the checkerboard indices to the array <code>objpoints</code> and appended their corresponding pixel coordinates to the array <code>imgpoints</code>.  I used <code>cv2.calibrateCamera()</code> to compute the calibration and distortion coefficients.</p>
+<p>Here is the original “calibration8.jpg”:<br>
+<img src="./output_images/calibration8.jpg" alt="Original &amp;quot;calibration8.jpg&amp;quot;"></p>
+<p>And here is the undistorted image:<br>
+<img src="./output_images/undistorted_calibration8.jpg" alt="Undistorted &amp;quot;calibration8.jpg&amp;quot;"></p>
+<h3><a id="Pipeline_single_images_49"></a>Pipeline (single images)</h3>
+<h4><a id="1_Provide_an_example_of_a_distortioncorrected_image_51"></a>1. Provide an example of a distortion-corrected image.</h4>
+<p>Here is the original “straight_lines1.jpg”:</p>
+<p><img src="./output_images/test_images/straight_lines1.jpg" alt="Original &amp;quot;straight_lines1.jpg&amp;quot;"></p>
+<p>And here is the undistorted image:<br>
+<img src="./output_images/undistorted/undistorted_straight_lines1.jpg" alt="Undistorted &amp;quot;straight_lines1.jpg&amp;quot;"></p>
+<h4><a id="2_Describe_how_and_identify_where_in_your_code_you_used_color_transforms_gradients_or_other_methods_to_create_a_thresholded_binary_image__Provide_an_example_of_a_binary_image_result_62"></a>2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.</h4>
+<p>See <a href="./lane.html#Lane.get_binary()"><code>Lane.get_binary()</code></a></p>
+<p>I used a combination of color and gradient thresholds to generate a binary image.  More specifically, I thresholded the gradient of the L channel and the pixel values of the S channel.  Here’s an example of my output for this step:</p>
+<p><img src="./output_images/test_images/test2.jpg" alt="Original &amp;quot;test2.jpg&amp;quot;"><br>
+<img src="./output_images/binary/binary_test2.jpg" alt="Undistorted binary &amp;quot;test2.jpg&amp;quot;"></p>
+<h4><a id="3_Describe_how_and_identify_where_in_your_code_you_performed_a_perspective_transform_and_provide_an_example_of_a_transformed_image_73"></a>3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.</h4>
+<p>See <a href="./lane.html#Lane.get_perspective()"><code>Lane.get_perspective()</code></a> and <a href="./Advanced_Lane_Finding_Project.html#Perspective-transform-constants">Perspective transform constants</a></p>
+<p>For my perspective transform, I specified 4 corners of a trapezoid (as <code>src</code>) in the undistorted original images and I specified the 4 corresponding corners of a rectangle (as <code>dst</code>) to which they are mapped in the perspective image.  After inspecting an undistorted image, I specified the parameters as follows:</p>
+<pre><code class="language-python">offset_x = <span class="hljs-number">300</span>
+offset_y = <span class="hljs-number">0</span>
+
+src = np.float32([[<span class="hljs-number">595</span>, <span class="hljs-number">450</span>], [<span class="hljs-number">685</span>, <span class="hljs-number">450</span>], [<span class="hljs-number">1000</span>, <span class="hljs-number">660</span>], [<span class="hljs-number">280</span>, <span class="hljs-number">660</span>]])
+
+dst = np.float32([[offset_x, offset_y],
+                  [img_size[<span class="hljs-number">0</span>]-offset_x, offset_y],
+                  [img_size[<span class="hljs-number">0</span>]-offset_x, img_size[<span class="hljs-number">1</span>]-offset_y],
+                  [offset_x, img_size[<span class="hljs-number">1</span>]-offset_y]])
+</code></pre>
+<p>Here is the undistorted “straight_lines1.jpg”:<br>
+<img src="./output_images/undistorted/undistorted_straight_lines1.jpg" alt="Undistorted &amp;quot;straight_lines1.jpg&amp;quot;"></p>
+<p>And here is a perspective view of the same image (with lines drawn):<br>
+<img src="./output_images/perspective/perspective_straight_lines1.jpg" alt="Perspective transform of &amp;quot;straight_lines1.jpg&amp;quot;"></p>
+<h4><a id="4_Describe_how_and_identify_where_in_your_code_you_identified_laneline_pixels_and_fit_their_positions_with_a_polynomial_99"></a>4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?</h4>
+<p>See <a href="./lane.html#Lane.fit_lines()"><code>Lane.fit_lines()</code></a></p>
+<p>Here are the steps I followed for fitting the lane lines.</p>
+<ol>
+<li>Get the thresholded binary image and apply the perspective transform.  See <a href="./lane.html#Lane.get_binary_perspective()"><code>Lane.get_binary_perspective()</code></a></li>
+</ol>
+<p><img src="./output_images/binary_perspective/binary_perspective_test2.jpg" alt="Binary perspective image of &amp;quot;test2.jpg&amp;quot;"></p>
+<ol start="2">
+<li>Find the sets of points to which I’ll fit a polynomial in order to get the left and right lane lines.  If there was a prior image (i.e., <code>Lane</code> object), then I used the points within +/- <code>margin_prior</code> of the previous fitted line; otherwise, I used a sliding window search (see <a href="./lane.html#Lane.find_window_centroids()"><code>Lane.find_window_centroids()</code></a>.  Here is an example plot of the points used to fit the lane lines (in red and blue) found via <code>Lane.find_window_centroids()</code>:</li>
+</ol>
+<p><img src="./output_images/windows/windows_test2.jpg" alt="Windows for &amp;quot;test2.jpg&amp;quot;"></p>
+<ol start="3">
+<li>
+<p>Fit polynomials to the sets of points found in the previous step.  My code accepts a parameter <code>d</code> that specifies the degree of the polynomials, but I only experimented with <code>d = 2</code>.  I fitted polynomials for both pixels and meters as the measurement units.  In the next step, I did some post-processing on these polynomials.</p>
+</li>
+<li>
+<p>Post-process the fitted polynomials.  If the image (i.e., <code>Lane</code> object) was part of a sequence, I averaged the polynomial coefficients over the last <code>n=3</code> polynomial fits.  I then computed the root mean square error (RMSE; see <a href="./lane.html#Lane.rmse()"><code>Lane.rmse()</code></a>) for both the left and right polynomials, where only points within +/- <code>margin</code> of the polynomials were considered.  The polynomial with the lower RMSE <em>should</em> be a better fit to the true lane line.  I discarded the polynomial with the higher RMSE and replaced it with a polynomial of degree 2 such that:</p>
+</li>
+</ol>
+<ul>
+<li>it has the same <code>x</code> value as the discarded polynomial at <code>y = rows - 1</code>, where <code>rows</code> is the number of rows in the image</li>
+<li>it has the same first derivative as the polynomial with the lower RMSE at <code>y = rows - 1</code></li>
+<li>its radius of curvature at <code>y = rows - 1</code> is greater/smaller than the other polynomial’s radius of curvature by <code>abs(x_right[rows-1] - x_left[rows-1])</code>, depending on which direction the car is turning.</li>
+</ul>
+<p>Here is an example of the final fitted lane lines, which I generated using <a href="./lane.html#Lane.plot_lines_perspective()"><code>Lane.plot_lines_perspective()</code></a>:</p>
+<p><img src="./output_images/lines_perspective/lines_perspective_test2.jpg" alt="Fitted lines for &amp;quot;test2.jpg&amp;quot; (binary perspective view)"></p>
+<h4><a id="5_Describe_how_and_identify_where_in_your_code_you_calculated_the_radius_of_curvature_of_the_lane_and_the_position_of_the_vehicle_with_respect_to_center_127"></a>5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.</h4>
+<p>See <a href="./lane.html#Lane.get_rad_curv()"><code>Lane.get_rad_curv()</code></a> and <a href="./lane.html#Lane.get_offset()"><code>Lane.get_offset()</code></a></p>
+<p>I calculated the left and right radii of curvature using the formula:</p>
+<pre><code>r = (1 + (first_deriv)**2)**1.5 / abs(second_deriv)
+</code></pre>
+<p>I calculated the offset of the vehicle by finding the <code>x</code> values (in meters) of the left and right polynomials at <code>y = (rows - 1) * ym_per_pix</code> and then took the difference from the center column of the image, converted to meters: <code>center = cols / 2 * xm_per_pix</code>.</p>
+<h4><a id="6_Provide_an_example_image_of_your_result_plotted_back_down_onto_the_road_such_that_the_lane_area_is_identified_clearly_141"></a>6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.</h4>
+<p>See <a href="./lane.html#Lane.plot_lines()"><code>Lane.plot_lines()</code></a></p>
+<p>Here is an example of the lane lines plotted on the undistorted road image for “test2.jpg”:</p>
+<p><img src="./output_images/lines/lines_test2.jpg" alt="Fitted lines for &amp;quot;test2.jpg&amp;quot; (undistorted view)"></p>
+<hr>
+<h3><a id="Pipeline_video_151"></a>Pipeline (video)</h3>
+<h4><a id="1_Provide_a_link_to_your_final_video_output__Your_pipeline_should_perform_reasonably_well_on_the_entire_project_video_wobbly_lines_are_ok_but_no_catastrophic_failures_that_would_cause_the_car_to_drive_off_the_road_153"></a>1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).</h4>
+<p>Here’s a <a href="./project_video_lanes.mp4">link to my video result</a></p>
+
+<video width="640" controls>
+<source src="./project_video_lanes.mp4" type="video/mp4">
+</video>
+
+<hr>
+<h3><a id="Discussion_159"></a>Discussion</h3>
+<h4><a id="1_Briefly_discuss_any_problems__issues_you_faced_in_your_implementation_of_this_project__Where_will_your_pipeline_likely_fail__What_could_you_do_to_make_it_more_robust_161"></a>1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?</h4>
+<p><strong>Challenges</strong></p>
+<p>Getting good quality binary images was more difficult than I expected, and I feel that there is a lot of room for improvement on this aspect of the project.  The difficulty was detecting the lanes but not detecting other edges, such as those due to shadows or the edge of the road.</p>
+<p><strong>Where the pipeline struggles</strong></p>
+<p>As can be seen in the <a href="./project_video_lanes.mp4">video</a>, this pipeline struggles when the car bounces and when the slope of the road changes.  This is because the hard-coded perspective transform parameters are no longer correct.  A better approach might involve finding the vanishing point of the images; that is, the point to which all straight lines converge.</p>
+<p><strong>Where the pipeline might fail</strong></p>
+<p>I can think of three general categories that would cause this pipeline to fail:</p>
+<ol>
+<li><strong>The car is not driving within the lane lines.</strong>  This pipeline assumes that the car is driving more or less in the center of the lane.  It would likely fail if the car were to change lanes because the model is simply not designed to handle a complex case such as this.</li>
+<li><strong>The binary thresholding portion of the pipeline does not detect the lane lines.</strong>  As I mentioned before, I feel that this aspect of the pipeline could be made much more accurate and robust.</li>
+<li><strong>The binary thresholding portion of the pipeline fails to eliminate edges which are not lane lines.</strong>  While I did not work much with the challenge video, the pipeline performs poorly there due to the line in the middle of the lane between the light and dark asphalt.  The model might also struggle with “tar snakes” on a road.  In order to accurately fit a polynomial to the lane lines, we need to have good data points with minimal noisy data points.</li>
+</ol>
+<p>Issues 2 and 3 relate to finding which pixels correspond to the lanes.  If we can do this reliably, then fitting a polynomial to those points should yield accurate estimations of the lane lines.</p>
+
+
+
+</section>
+</div>
+
+<!-- FOOTER  -->
+<div id="footer_wrap" class="outer">
+<footer class="inner">
+<p class="copyright">Webpage maintained by <a href="https://github.com/JeffLIrion">Jeff Irion</a></p>
+<p>Published with <a href="https://pages.github.com">GitHub Pages</a></p>
+</footer>
+</div>
+
+
+
+
+</body>
+</html>
